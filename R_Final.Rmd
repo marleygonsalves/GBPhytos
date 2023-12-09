@@ -1,0 +1,494 @@
+---
+title: "BIOL 906 Final Assignment: Great Bay Phytoplankton "
+author: "Marley Gonsalves"
+date: "2023-12-08"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    pandoc_args: "--pdf-engine-opt=--enable-write18"
+fig_caption: yes
+editor_options:
+  chunk_output_type: console
+---
+```{r packages, include = FALSE, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+# Introduction
+
+Marine phytoplankton are single-celled organisms, both prokaryotic and eukaryotic, that conduct photosynthesis in the ocean. They are the base of the marine food web (Henson et al., 2021), contribute 50% of primary production (Field et al., 1998), and are vital for the biogeochemical cycling of nutrients like nitrogen, phosphorus, and iron (Arrigo, 2005), as well as carbon cycling and sequestration. (Falkowski, 1994).  Phytoplankton size classes include micro- (diameter > 20 µm; e.g. large diatoms), nano- (diameter from 2 to 20 µm; e.g. small diatoms and coccolithophores), and picoplankton ( diameter <2 µm; e.g. small haptophytes and cyanobacteria) (Sieburth et al., 1978). 
+
+Phytoplankton exhibit great functional and genetic diversity, and different taxa perform different roles in the environment (Orkney et al., 2022). For instance, diazotrophs fix atmospheric nitrogen, while diatoms contribute to the silica cycle (Henson et al., 2021). Therefore, community composition plays a role in overall trends in the ecosystem. Phytoplankton community composition (PCC) can affect the environment and other organisms, but it can also be affected by those factors (Parparov & Gal, 2022). The interplay between PCC and anthropogenic inputs is of special interest due to the rapidly changing marine environment. Previous studies have shown that increasing temperature can affect PCC (Orkney et al., 2022). Anthropogenic inputs can disrupt community balances, leading to conditions that support harmful algal blooms (Parparov & Gal, 2022), which can outcompete native species, produce toxins, or lead to hypoxic conditions that render the water uninhabitable. 
+	
+The study of PCC depends on the ability to enumerate and differentiate between phytoplankton taxa. This can be challenging because of the spatial and temporal variability of phytoplankton, as well as their small size. Phytoplankton populations change over time and space, so comprehensive time series data is the best way to study their dynamics. This requires many samples, but their microscopic size makes sample processing difficult, historically requiring skilled technicians, microscopes, and extensive time and labor. Luckily, technological advances have aided in the study of phytoplankton populations. 
+	
+Flow cytometry can be used to process samples quickly and accurately determine taxa concentrations. The combination of taxa specific stains and flow cytometry can help with identification. Imaging flow cytometry (i.e. FlowCAM) has the added benefit of capturing quantitative data about individual particles in a sample, such as size and shape, through pictures, also helping with the identification of microplankton. Unfortunately, no one method is perfect: due to resolution constraints, the smallest of phytoplankton still require additional identification, such as through the use of omics (Menden-Deuer et al., 2020). Regardless, imaging flow cytometry is a powerful tool for the identification of larger microplankton and can quickly and easily provide qualitative information about a plankton community as a whole, such as size ranges and trends.
+
+The study site for this analysis is Great Bay, New Hampshire. Great Bay is an estuary that extends from the Gulf of Maine , a rapidly warming area in the world ocean (Pershing et al., 2015). In spring of 2023 a large bloom of *Tripos muelleri*, a large dinoflagellate, formed in the Gulf of Maine, leading to an unprecedented decrease of carbon dioxide in the area (Ray, 2023), which is connected to Great Bay. No such bloom was observed in 2021.
+
+# Objectives 
+
+-	Observe summer particle and environmental trends in Great Bay
+
+-	Determine if particle size and count correlate with temperature 
+
+# Methods
+
+```{r data cleaning, include = FALSE, warning = FALSE, message = FALSE}
+
+#set R/final project as working directory
+
+all_FC_data <- c("data/june2021.csv", "data/july2021.csv", "data/august2021.csv", "data/june2023(6.29).csv", "data/july2023(5.13.20).csv", "data/july2023(26).csv", "data/august2023(3.11.16).csv", "data/august2023(22.31).csv") #enter all flow cam data
+
+raw_FC_data <- lapply(all_FC_data, read.csv) %>%
+  bind_rows() #read files, combine into one
+
+JEL_ABD <- raw_FC_data[, c(1, 29)] %>% #keep only name and particle diameter
+  rename(Date = Name, `ParticleDiameter` = Diameter..ABD.) %>% #rename columns appropriately 
+  mutate(
+    Date = gsub(".*?([0-9]+)([A-Za-z]+)([0-9]+).*", "\\3 \\2 \\1", Date), #convert name of file to standard date
+    Date = as.Date(Date, format = "%Y %B %d"), #Convert Date column form character to date
+    Year = year(Date),# Extract the year
+    Year = as.factor(Year), #convert Year to factor
+    Month = month(Date, label = TRUE, abbr = FALSE) 
+     ) %>%
+  arrange(Date) #arrange chronologically 
+
+
+#average flow cam by collection day
+averaged_FC_data <- JEL_ABD %>%
+  group_by(Date) %>%
+  summarize(
+    AvgParticleDiameter = mean(ParticleDiameter, na.rm = TRUE),
+  ) 
+
+#median particle size by collection day
+median_FC_data <- JEL_ABD %>%
+  group_by(Date) %>%
+  summarize(
+    MedParticleDiameter = median(ParticleDiameter, na.rm = TRUE),
+  ) 
+
+#count number of particles per collection day
+number_FC_data <- JEL_ABD %>%
+  group_by(Date) %>%
+  summarize(
+      Count = n()
+  )
+
+rawNERRS_data <- read.csv(file = "data/NERRS_data.csv") #load NERRS environmental data from CSV
+
+cleanNERRS_data <- rawNERRS_data[, c(3, 7, 25)]%>% #keep only date, temperature, and Chl data
+  slice(-c(1, 2))%>% #get rid of header rows
+  rename(Date = X.1, Temperature = X.5, Chlorophyll = X.23) %>% #rename columns appropriately
+  mutate(
+    Date = as.POSIXct(strptime(Date, "%m/%d/%Y %H:%M")), #convert date to date object (with hour:minute)
+    Date = as.Date(Date), #drop hour:minute
+    Year = year(Date),#make a year column
+    Temperature = as.numeric(Temperature), 
+    Chlorophyll = as.numeric(Chlorophyll) #convert temperature and chl data to numeric
+  )%>%
+    group_by(Date) %>%
+  summarize(
+    Average_Temperature = mean(Temperature, na.rm = TRUE),
+    Average_Chlorophyll = mean(Chlorophyll, na.rm = TRUE)
+  ) #average temperature and chlorophyll by day
+
+
+
+cleanNERRS_data <- rawNERRS_data[, c(3, 7, 25)] %>%
+  slice(-c(1, 2)) %>%
+  rename(Date = X.1, Temperature = X.5, Chlorophyll = X.23) %>%
+  mutate(
+    Date = as.POSIXct(strptime(Date, "%m/%d/%Y %H:%M")), # convert date to date-time object
+    Date = as.Date(Date), # drop hour:minute
+    Temperature = as.numeric(Temperature), 
+    Chlorophyll = as.numeric(Chlorophyll) # convert temperature and chl data to numeric
+  ) %>%
+  group_by(Date) %>%
+  summarize(
+    Average_Temperature = mean(Temperature, na.rm = TRUE),
+    Average_Chlorophyll = mean(Chlorophyll, na.rm = TRUE)
+  ) %>%
+    mutate(
+      Year = year(Date),
+       Month = month(Date, label = TRUE, abbr = FALSE) 
+     )
+#combine flow cam and NERRS data 
+sampleday_data <- merge(averaged_FC_data, cleanNERRS_data, by = "Date")
+sampleday_data <- merge(sampleday_data, number_FC_data, by = "Date")
+sampleday_data <- merge(sampleday_data, median_FC_data, by = "Date")
+
+sampleday_data$JulianDay <- yday(sampleday_data$Date)
+
+sampleday_long <- sampleday_data %>%
+  gather(key = "variable", value = "value", -Date)
+
+sampleday_longts <- sampleday_data %>%
+  select(-Year, -MedParticleDiameter, -JulianDay, -Month) %>%
+  gather(key = "variable", value = "value", -Date) %>%
+  mutate(julian_day = yday(Date))
+```
+
+```{r subset creation, include = FALSE, warning = FALSE, message = FALSE}
+#subset flow cam data by month
+JELJune <- subset(JEL_ABD, Month == "June")
+JELJuly <- subset(JEL_ABD, Month == "July")
+JELAugust <- subset(JEL_ABD, Month == "August")
+
+#subset flow cam data by month and year
+JELJune2021 <- JEL_ABD %>%
+  filter(Date < as.Date("2021-07-01")) 
+JELJuly2021 <- JEL_ABD %>%
+  filter(Date > as.Date("2021-06-30") & Date < as.Date("2021-08-01"))
+JELAugust2021 <- JEL_ABD %>%
+  filter(Date > as.Date("2021-07-31") & Date < as.Date("2021-09-01")) 
+JELJune2023 <- JEL_ABD %>%
+  filter(Date > as.Date("2023-5-31") & Date < as.Date("2023-07-01"))
+JELJuly2023 <- JEL_ABD %>%
+  filter(Date > as.Date("2023-06-30") & Date < as.Date("2023-08-01"))
+JELAugust2023 <- JEL_ABD %>%
+  filter(Date > as.Date("2023-07-31") & Date < as.Date("2023-09-01"))
+
+#subset NERRS data by year
+NERRS_data_2021 <- cleanNERRS_data %>%
+  filter(Date < as.Date("2021-09-01")) 
+NERRS_data_2022 <- cleanNERRS_data %>%
+  filter(Date > as.Date("2022-05-31") & Date < as.Date("2022-09-01"))
+NERRS_data_2023 <- cleanNERRS_data %>%
+  filter(Date > as.Date("2023-05-31") & Date < as.Date("2023-09-01")) 
+
+```
+
+```{r random useful stats, include = FALSE, warning = FALSE,message = FALSE}
+#percentage of data points less than 100
+percentage_under_threshold <- (sum(JEL_ABD$ParticleDiameter <= 100) / length(JEL_ABD$ParticleDiameter)) * 100
+cat("Percentage of data points under", 100, ":", percentage_under_threshold, "%\n")
+
+percentage_under_threshold2 <- (sum(JEL_ABD$ParticleDiameter <= 50) / length(JEL_ABD$ParticleDiameter)) * 100
+cat("Percentage of data points under", 50, ":", percentage_under_threshold2, "%\n")
+```
+
+All code used can be found at: https://github.com/marleygonsalves/GBPhytos.git/. 
+
+*Data collection*
+
+FlowCam data was provided by the Harvey Lab at the University of New Hampshire. The Harvey Lab processes weekly samples from throughout coastal New Hampshire. During FlowCam analysis, samples are filtered through a 40 µm filter and analyzed using a 4x lens. I utilized samples from the Jackson Estuarine Lab in Durham, New Hampshire, collected weekly from June to August in 2021, and 2023. 
+	
+Environmental data was provided by the National Estuarine Research Reserve System buoy in Great Bay, New Hampshire. This buoy collects environmental data, including temperature, dissolved oxygen, and chlorophyll a concertation, every fifteen minutes daily.
+	
+*Data cleaning and dataset manipulation*
+
+Data was accessed—from the Harvey Lab FlowCam and NERRS website—as .csv files and loaded into R v 4.3.1 programming software (R Core Team, 2023). Data was converted to a standard, useable format. Unnecessary columns were deleted, leaving only date and particle diameter for FlowCam data, and date, temperature, and chlorophyll concentration for NERRS data. 
+	
+The date column from both data sets were converted to date objects to allow for analysis. Since the NERRS data provided data every 15 minutes, data points from each data were compiled into a daily average. The FlowCam dataset was not averaged in order to create particle size distribution graphs. However, a third dataset was created, averaging FlowCam data for each collection day and adding environmental data for the collection days. All three datasets were used to perform various analyses.
+
+*Analysis*
+
+Time series plots of temperature, chlorophyll, particle size, and particle count were created using the geom_line() function in order to visualize the spread of data and identify overall seasonal trends. Julian date as used as the x axis variable to plot both years on the same graph. A one-way analysis of variance (ANOVA) was run for each variable, to determine if the years are significantly different. Additionally, a linear regression was computed for the temperature variable, to determine how it changed over time. 
+
+Next, in order to determine if there was a positive correlation between chlorophyll a concentration and temperature a scatter plot was created of the two variables. Linear regression lines were added to the graph for the data as a whole, as well as 2021 and 2023 individually, and linear models were created for each line. 
+
+Next, particle size distribution graphs were created using geom_histogram(). The X axis was limited to 50 µm to allow for better visualization of the `r percentage_under_threshold2`% of data points within that range. Using the facet_wrap() function one graph was created for each year, and the months of each year were color coded on that graph. The differences in means of the two years, and each month between the two years, were analyzed using four total independent two-sample t-tests. 
+
+Normalized size distribution graphs were also created to mitigate the effect of sample size on the distribution. This was accomplished by using the geom_histogram() function and specifying ‘y = ..density..’. 
+
+A scatter plot was created comparing temperature and average particle diameter, faceted for each year. A linear regression model was created for each year, analyzing the effect of temperature on particle size. Additional linear models were created analyzing the effect of temperature on particle number. A two-way analysis of variance (ANOVA) with an interaction term was conducted to analyze the effects of temperature and year on particle size.
+
+Lastly, a scatter plot was created comparing average particle diameter to chlorophyll a concentration, in order to determine if it could be used to predict chlorophyll, a proxy for phytoplankton biomass. Linear regressions were created to determine the effect of particle diameter on chlorophyll for both years together, and each individually. Three more linear regressions were calculated analyzing the effects of particle number of chlorophyll (2021/2023, 2021, and 2023).
+
+# Results
+
+```{r graph 1, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "\\label{fig:1} Line plots showing how chlorophyll a ($\\mu$g/L), temperature (°C), average particle diameter ($\\mu$M), and daily particle number vary over the summers of 2021 and 2023. The mean of each variable was calculated for each sampling day and compared to Julian date."}
+
+ts_labels <- c(Average_Chlorophyll = "Chlorophyll (μg/L) ", Average_Temperature = "Temperature (°C)", AvgParticleDiameter = "Average Particle Diamter (μm)", Count = "Daily Particle Number")
+
+ggplot(sampleday_longts, aes(x = yday(Date), y = value)) +
+  geom_line(data = subset(sampleday_longts, Date > "2021-06-01" & Date < "2021-09-01"),
+            aes(color = "2021")) +
+  geom_line(data = subset(sampleday_longts, Date > "2023-06-01" & Date < "2023-09-01"),
+            aes(color = "2023")) +
+  facet_wrap(variable ~ ., scales = "free_y", 
+             labeller = as_labeller(ts_labels), ncol = 2) +
+  ylab(NULL)+
+  labs(x = "Julian Day") +
+  theme_minimal() +
+  scale_color_manual(values = c("2021" = "blue", "2023" = "red"), name = "Year")+
+  theme(axis.text = element_text(size = 6), axis.title = element_text(size = 8), plot.caption = element_text(size = 6))
+
+```
+
+```{r graph 1 stats, include = FALSE, warning = FALSE, message = FALSE}
+aov_1.1 <- aov(Average_Chlorophyll ~ Year, data = sampleday_data)
+aov_1.2 <- aov(Average_Temperature ~ Year, data = sampleday_data)
+aov_1.3 <- aov(AvgParticleDiameter ~ Year, data = sampleday_data)
+aov_1.4 <- aov(Count ~ Year, data = sampleday_data)
+aov_1.5 <- aov(Count ~ Month, data = sampleday_data)
+aov_1.6 <- aov(Count ~ Month * Year, data = sampleday_data)
+
+summary(aov_1.1)
+summary(aov_1.2)
+summary(aov_1.3)
+summary(aov_1.4)
+summary(aov_1.5)
+summary(aov_1.6)
+
+
+aov_1.7 <- aov(Average_Chlorophyll ~ Year, data = cleanNERRS_data)
+aov_1.8 <- aov(Average_Temperature ~ Year, data = cleanNERRS_data)
+summary(aov_1.7)
+summary(aov_1.8)
+
+tukeyHSD_1.1 <- TukeyHSD(aov_1.5, "Month")
+tukeyHSD_1.2 <- TukeyHSD(aov_1.6, "Month")
+print(tukeyHSD_1.1)
+print(tukeyHSD_1.2)
+
+
+lm_1.1 <- lm(Average_Temperature ~ JulianDay, data = subset(sampleday_data, Year == 2021))
+lm_1.2 <- lm(Average_Temperature ~ JulianDay, data = subset(sampleday_data, Year == 2023))
+lm_1.3 <- lm(Average_Temperature ~ JulianDay, data = subset(sampleday_data, Date > "2023-06-01" & Date < "2023-08-01"))
+
+summary(lm_1.1)
+summary(lm_1.2)
+summary(lm_1.3)
+
+```
+
+Visibly, 2021 and 2023 were different over all four variables. There appeared to be peaks around day 200 for all variables, +- ~12 days. 
+Temperature increased significantly from June to August in 2021 (p-value = `r summary(lm_1.1)$coefficients["JulianDay", "Pr(>|t|)"]`). In 2023, temperature increased signficiantly until August (p-value = `r summary(lm_1.3)$coefficients["JulianDay", "Pr(>|t|)"]`), though not over the year as a whole (p-value = `r  summary(lm_1.2)$coefficients["JulianDay", "Pr(>|t|)"]`).
+Running an ANOVA for the differences between the years for the variables showed that clorophyll and average particle diameter were significantly different between the years (p-value = `r  summary(aov_1.1)[[1]][[1,"Pr(>F)"]]` and `r  summary(aov_1.3)[[1]][[1,"Pr(>F)"]]` respecivitly). 
+Temperature and daily particle number were not significantly different (p-value = `r  summary(aov_1.2)[[1]][[1,"Pr(>F)"]]` and `r  summary(aov_1.4)[[1]][[1,"Pr(>F)"]]` respectively), though month had a signficiant effect on particle number (p-value = `r  summary(aov_1.5)[[1]][[1,"Pr(>F)"]]`).
+
+
+
+\pagebreak
+
+```{r graph 2, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "\\label{fig:2} Scatter plot showing the relationship between temperature (°C) and chlorophyll a concentration ($\\mu$g/L), with color differentiation between 2021 and 2023. Linear regression lines were added for all data points, and for 2021 and 2023 individually."}
+ggplot(data = cleanNERRS_data, aes(x = Average_Temperature, y = Average_Chlorophyll, color = as.factor(Year))) +
+  geom_point() +
+  geom_smooth(aes(color = "Overall"), method = "lm", se = FALSE) +
+  geom_smooth(data = subset(sampleday_data, year(Date) == 2021), aes(color = "2021"), method = "lm", se = FALSE) +
+  geom_smooth(data = subset(sampleday_data, year(Date) == 2023), aes(color = "2023"), method = "lm", se = FALSE) +
+  labs(x = "Temperature (°C)", y = "Chlorophyll (μM)") +
+  scale_color_manual(values = c("2021" = "blue", "2023" = "red", "Overall" = "black"), name = "Year") +
+  theme_minimal()
+```
+
+```{r graph 2 analysis, include = FALSE, warning = FALSE, message = FALSE}
+lm_2.1 <- lm(Average_Chlorophyll ~ Average_Temperature, data = cleanNERRS_data)
+lm_2.2 <- lm(Average_Chlorophyll ~ Average_Temperature, data = subset(cleanNERRS_data, Year == 2021))
+lm_2.3 <- lm(Average_Chlorophyll ~ Average_Temperature, data = subset(cleanNERRS_data, Year == 2023))
+summary(lm_2.1)
+summary(lm_2.2)
+summary(lm_2.3)
+
+aov_5.1 <- aov(Average_Chlorophyll ~ Average_Temperature * Year, data = cleanNERRS_data)
+summary(aov_5.1)
+```
+
+There is a significant positive correlation between average temperature and chlorophyll overall. The overall relationship has a p-value of `r  summary(lm_2.1)$coefficients["Average_Temperature", "Pr(>|t|)"]` (`r expression(R^2)` = `r summary(lm_2.1)$r.squared`) and 2021 and 2023 have p-values of `r  summary(lm_2.2)$coefficients["Average_Temperature", "Pr(>|t|)"]`, (`r expression(R^2)` = `r summary(lm_2.2)$r.squared`), and `r  summary(lm_2.3)$coefficients["Average_Temperature", "Pr(>|t|)"]`, (`r expression(R^2)` = `r summary(lm_2.3)$r.squared`), respectively.
+
+\pagebreak
+
+```{r graph 3, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "\\label{fig:3} Particle size distribution plots of particle diameter ($\\mu$M), comparing 2021 and 2023. Months of each year are distinguished by color."}
+ggplot() +
+  geom_histogram(data = JELJuly2021, aes(x = ParticleDiameter, fill = "July"), binwidth = 1, color = "black", alpha = 0.7) +
+  geom_histogram(data = JELJune2021, aes(x = ParticleDiameter, fill = "June"), binwidth = 1, color = "black", alpha = 0.7) +
+  geom_histogram(data = JELAugust2021, aes(x = ParticleDiameter, fill = "August"), binwidth = 1, color = "black", alpha = 0.7) +
+  geom_histogram(data = JELJuly2023, aes(x = ParticleDiameter, fill = "July"), binwidth = 1, color = "black", alpha = 0.7) + 
+  geom_histogram(data = JELAugust2023, aes(x = ParticleDiameter, fill = "August"), binwidth = 1, color = "black", alpha = 0.7) + 
+  geom_histogram(data = JELJune2023, aes(x = ParticleDiameter, fill = "June"), binwidth = 1, color = "black", alpha = 0.7) +
+  labs(x = "Particle Diameter (μM)",
+       y = "Frequency") +
+  scale_fill_manual(
+    values = c("June" = "red", "July" = "purple", "August" = "blue"),
+    name = "Month")+
+  theme_minimal() +
+  xlim(c(0, 50)) +
+  facet_wrap(Year ~ ., scales = "free", switch = "both", ncol = 2)+
+  coord_cartesian(ylim = c(0, 25000))
+```
+
+```{r graph 3 analysis, include = FALSE, warning = FALSE, message = FALSE}
+t_3.1 <- t.test(ParticleDiameter ~ Year, data = JEL_ABD)
+t_3.2 <- t.test(ParticleDiameter ~ Year, data = JELJune)
+t_3.3 <- t.test(ParticleDiameter ~ Year, data = JELJuly)
+t_3.4 <- t.test(ParticleDiameter ~ Year, data = JELAugust)
+
+print(t_3.1)
+print(t_3.2)
+print(t_3.3)
+print(t_3.4)
+
+```
+
+The highest frequency of particles are are around 12 µm in diameter, which is consistent over months and years. 2023 has a higher frequency of particles overall. July of each year has the highest frequency of particles and August has the lowest. June differs between the two years——in 2021, June had a higher frequency than August, but in 2023 the two months have very similar frequencies. 
+Particles in 2023 were significantly larger than in 2021 by `r t_3.1$estimate[1] - t_3.1$estimate[2]` µm (p-value = `r format(t_3.1$p.value, scientific = TRUE, digits = 7)`). Significant differences in mean particle sizes were observed for each month between the two years. June 2021 had a higher mean by `r t_3.2$estimate[1] - t_3.2$estimate[2]` µm (p-value = `r t_3.2$p.value`), July 2023 had a higher mean by `r t_3.3$estimate[1] - t_3.1$estimate[2]` µm (p-value = `r format(t_3.3$p.value, scientific = TRUE, digits = 7)`), and August 2023 had a higher mean by µm `r t_3.4$estimate[1] - t_3.4$estimate[2]` (p-value = `r format(t_3.4$p.value, scientific = TRUE, digits = 7)`)
+
+
+\pagebreak
+
+```{r graph 4, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "\\label{fig:4} Normalized particle size distribution plots of particle diameter ($\\mu$M), comparing 2021 and 2023. Months of each year are distinguished by color."}
+ggplot(JEL_ABD, aes(x = ParticleDiameter, y = ..density.., fill = as.factor (Year))) +
+  geom_histogram(binwidth = 1, color = "black", alpha = 0.7) +
+  labs(title = "Normalized Particle Size Distribution",
+       x = "Particle Size (μM)",
+       y = "Density") +
+  theme_minimal() +
+  xlim(c(0, 50)) +
+    facet_grid(Month ~ Year, scales = "free_x", space = "free_x", switch = "both") +
+   scale_fill_manual(values = c("2021" = "blue", "2023" = "red"), name = "Year")+
+  coord_cartesian(ylim = c (0, 0.15))
+
+```
+
+When normalized, the particle size distributions for each month are more similar than the not normalized particle distribution plots are. They are not identical, though, and each month had a different distribution. July 2021 and 2023 have the most significant difference, with the peak of July 2021 higher than that of 2023. 
+
+\pagebreak
+
+```{r graph 5, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "\\label{fig:5} Scatter plot showing the relationship between temperature (°C) and average particle diameter ($\\mu$M), faceted by year. A linear regression line with standard error was included for each plot."}
+ggplot(sampleday_data, aes(x=Average_Temperature, y=AvgParticleDiameter)) +
+  geom_point(aes(color = as.factor(Year))) +
+  labs(x = "Temperature (°C)", y = "Average Particle Diameter (μM)")+
+  geom_smooth(method = "lm", color = "black")+
+  facet_wrap(~Year, scales = "free") +
+  coord_cartesian(xlim = c(15, 24), ylim = c (14.5, 19)) +
+  scale_color_manual(values = c("2021" = "blue", "2023" = "red"), name = "Year")
+```
+
+```{r graph 5 analysis, include = FALSE, warning = FALSE, message = FALSE}
+lm_5.1 <- lm(AvgParticleDiameter ~ Average_Temperature, data = sampleday_data)
+lm_5.2 <- lm(AvgParticleDiameter ~ Average_Temperature, data = subset(sampleday_data, Year == 2021))
+lm_5.3 <- lm(AvgParticleDiameter ~ Average_Temperature, data = subset(sampleday_data, Year == 2023))
+summary(lm_5.1)
+summary(lm_5.2)
+summary(lm_5.3)
+
+lm_5.4 <- lm(Count ~ Average_Temperature, data = sampleday_data)
+lm_5.5 <- lm(Count ~ Average_Temperature, data = subset(sampleday_data, Year == 2021))
+lm_5.6 <- lm(Count ~ Average_Temperature, data = subset(sampleday_data, Year == 2023))
+summary(lm_5.4)
+summary(lm_5.5)
+summary(lm_5.6)
+
+aov_5.1 <- aov(AvgParticleDiameter ~ Average_Temperature, data = sampleday_data)
+aov_5.2 <- aov(AvgParticleDiameter ~ Year * Average_Temperature, data = sampleday_data)
+
+summary(aov_5.1)
+summary(aov_5.2)
+
+```
+
+There was not a signficiant relationship between temperature and particle diameter for either year. In 2021 the p-value for the relationship was `r  summary(lm_5.2)$coefficients["Average_Temperature", "Pr(>|t|)"]`, and in 2023 the p-value was `r  summary(lm_5.3)$coefficients["Average_Temperature", "Pr(>|t|)"]`. There was also not a significant relationship between temperature and number of particles; in 2021 the p-value for the relationship was `r  summary(lm_5.5)$coefficients["Average_Temperature", "Pr(>|t|)"]`, and in 2023 the p-value was `r  summary(lm_5.6)$coefficients["Average_Temperature", "Pr(>|t|)"]`. The two-way ANOVA with interaction revealed that the difference the temperature/particle size relationship between the two years was borderline signficant (p-value = `r  summary(aov_5.2)[[1]][[1,"Pr(>F)"]]`), but the two slopes were not significantly different. 
+
+\pagebreak
+
+```{r graph 6, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "\\label{fig:6} Scatter plot showing the relationship between average particle diameter ($\\mu$M) and chlorophyll a concentration ($\\mu$g/L). 2021 and 2023 are distinguished by color, and the number of particles on a particlar day is indicated by the size of the data point.A linear regression showing the relationship between the variables was created."}
+ggplot(sampleday_data, aes(x=AvgParticleDiameter, y=Average_Chlorophyll)) +
+  geom_point(aes(color = as.factor(Year), size = Count)) +
+  geom_smooth(method = "lm", color = "black", se = F, fullrange = T)+
+  labs(x = "Average Particle Diameter (μM)", y = "Chlorphyll (μg/L)")+
+  coord_cartesian(xlim = c(14.5, 19), ylim = c (3, 15)) +
+  scale_color_manual(values = c("2021" = "green2", "2023" = "green4"))+
+  guides(color = guide_legend(title = "Year", size = "none")) 
+
+```
+
+```{r graph 6 analysis, include = FALSE, warning = FALSE, message = FALSE}
+lm_6.1 <- lm(Average_Chlorophyll ~ AvgParticleDiameter, data = sampleday_data)
+lm_6.2 <- lm(Average_Chlorophyll ~ AvgParticleDiameter, data = subset(sampleday_data, Year == 2021))
+lm_6.3 <- lm(Average_Chlorophyll ~ AvgParticleDiameter, data = subset(sampleday_data, Year == 2023))
+summary(lm_6.1)
+summary(lm_6.2)
+summary(lm_6.3)
+
+lm_6.4 <- lm(Average_Chlorophyll ~ Count, data = sampleday_data)
+lm_6.5 <- lm(Average_Chlorophyll ~ Count, data = subset(sampleday_data, Year == 2021))
+lm_6.6 <- lm(Average_Chlorophyll ~ Count, data = subset(sampleday_data, Year == 2023))
+summary(lm_6.4)
+summary(lm_6.5)
+summary(lm_6.6)
+```
+
+The relationship between average particle diameter and chlorophyll was not significant (p = `r summary(lm_6.1)$coefficients["AvgParticleDiameter", "Pr(>|t|)"]`). The relationship between the varialbles was also not significant in either 2021 and 2023 (p-value = `r summary(lm_6.2)$coefficients["AvgParticleDiameter", "Pr(>|t|)"]` and `r summary(lm_6.3)$coefficients["AvgParticleDiameter", "Pr(>|t|)"]`, respectively). None of the  three relationships between particle count and chlorophyll (2021 & 2023, 2021, and 2023) were significant (p-value = `r summary(lm_6.4)$coefficients["Count", "Pr(>|t|)"]`, `r summary(lm_6.5)$coefficients["Count", "Pr(>|t|)"]`, and `r summary(lm_6.6)$coefficients["Count", "Pr(>|t|)"]` respectively).
+
+\pagebreak
+
+# Discussion 
+
+*Seasonal trends*
+
+There was variation within and between years for all four variables tested. The peaks in chlorophyll and average particle diameter (the variables that were significantly different between years) did not occur at the same time but were likely related due to their similar extents. While particle numbers were not significantly different between the years, both years exhibit a spike near day 200, which is similar to the spikes in chlorophyll and average particle diameter. The spike in 2023 for the variable is unusual, as there is a day with low particle numbers in between two days with higher particle numbers. While this could be representative of the actual particles present, there are several factors that could have affected the sampling, such as changes in precipitation or human error. Though the particles were not different over the year, there was a significant effect of month on particle number, with assumably more particles in around the peak.
+	
+The change in temperature over time was also interesting; while temperature increased significantly over time in 2021, this was not observed in 2023. Temperature increased significantly until the end of July, which is supported by the visible peak, but not until the end of the summer. This unexplained decrease in temperature could have had an effect on the algal community. 
+
+*Particle size distribution*
+
+The spread of particle sizes is visibly different between the two years, with 2023 having higher frequencies of particles overall. This is interesting, since the particle number variable was not significantly different between the two years, despite the graphs being different. The means were slightly different between the two years, though this was not as apparent on the graphs since the particles were split into 1 µm bins (which was around the size difference). When normalized, the particle size spread was much more similar for all months. This suggests that the primary change in particle distribution was due to changes in particle number. However, since the normalized particle size distribution plots were not identical, this suggests that there were differences in the composition of the particles. 
+	
+*Effects of temperature*
+
+Temperature and chlorophyll a concentration has a complex relationship, that takes into context many other variables, such as light and nutrient availability (Dunstan et al., 2018). Overall, chlorophyll tends to decrease with increasing temperature (Behrenfeld et al., 2006), but chlorophyll from cyanobacteria tends to increase with temperature (Brotas et al., 2022). This study revealed that there was a positive relationship between temperature and chlorophyll in both 2021 and 2023. These relationships both had low p-values, indicating significance, and low r^2 values, which shows that a linear model is a poor fit for the relationship. The p-value for 2021 was lower than in 2023, which could suggest that there are different populations present each year. Additional study would be needed to confirm this.
+	
+Temperature did not have a significant correlation with average particle size for either year. In 2021 this relationship was negative, which is more consistent with the literature that suggests a flourishing of cyanobacteria in warm water (Flombaum & Martiny, 2021), but in 2023 the relationship was positive. Similar trends were displayed when comparing particle number and temperature (graph not shown). Regardless, both relationships had high p-values, so the results indicant that temperature does not have an effect on particles. 
+	
+*Data limitations*
+
+A limitation to this study is the weekly availability of FlowCam data. The environmental data collection was autonomous, which means that it could be collected more frequently than the particle data, which required a technician. More comprehensive data coverage could have revealed more detailed relationships between particle number and size and the other variables. 
+
+Issues with data collection could have affected these results. While the FlowCam is a valuable tool, a drawback to its use is that it does not differentiate between living cells and detritus. This is displayed in the lack of a relationship between chlorophyll (a proxy for phytoplankton biomass) and particle diameter; if the FlowCam was analyzing only cells, this relationship would theoretically be significantly positive, but the relationship is not significant. Using tools such as a laser that detects fluorescence would help to better identify living cells (Dashkova et al., 2017), and perhaps produce new findings.
+
+Another limitation to this data is the size of particles observable by the FlowCam. While temperature doesn’t seem to have a large effect on larger phytoplankton, smaller cells are more susceptible to increase. Cyanobacteria, particularly, seem to prefer warm temperatures. The NERRS buoy could have picked up on chlorophyll from cyanobacteria, but the FlowCam would not have been able to. This could help explain the disparity in the particle size and chlorophyll measurements, if the increased chlorophyll is from particles below the detection limit. 
+
+*Conclusion and future research directions*
+
+The particles and phytoplankton communities in Great Bay are clearly different between the two years, as displayed by the significant differences in particle size and chlorophyll. While these differences are not related to temperature, there are many other variables in the environment that could impact PCC and chlorophyll. These include nutrient availability (Heil et al., 2007), weather events (Bruno et al., 2023), and grazing pressure (Bergquist et al., 1985) none of which were addressed.  
+
+Understanding the effects of temperature and other changing environmental conditions is crucial in order to prepare for climate change. Phytoplankton are susceptible to community changes in a changing climate (Sugie et al., 2020), which could potentially alter the environmental services they provide. 
+
+# References
+
+Arrigo, K. R. (2005). Marine microorganisms and global nutrient cycles. Nature, 437(7057), Article 7057. https://doi.org/10.1038/nature04159
+
+Behrenfeld, M. J., O’Malley, R. T., Siegel, D. A., McClain, C. R., Sarmiento, J. L., Feldman, G. C., Milligan, A. J., Falkowski, P. G., Letelier, R. M., & Boss, E. S. (2006). Climate-driven trends in contemporary ocean productivity. Nature, 444(7120), Article 7120. https://doi.org/10.1038/nature05317
+
+Bergquist, A. M., Carpenter, S. R., & Latino, J. C. (1985). Shifts in phytoplankton size structure and community composition during grazing by contrasting zooplankton assemblages1. Limnology and Oceanography, 30(5), 1037–1045. https://doi.org/10.4319/lo.1985.30.5.1037
+
+Brotas, V., Tarran, G. A., Veloso, V., Brewin, R. J. W., Woodward, E. M. S., Airs, R., Beltran, C., Ferreira, A., & Groom, S. B. (2022). Complementary Approaches to Assess Phytoplankton Groups and Size Classes on a Long Transect in the Atlantic Ocean. Frontiers in Marine Science, 8. https://www.frontiersin.org/articles/10.3389/fmars.2021.682621
+
+Bruno, D. O., Valencia-Carrasco, C., Paci, M. A., Leonarduzzi, E., Castro, L., Riccialdelli, L., Iachetti, C. M., Cadaillon, A., Giesecke, R., Schloss, I. R., Berghoff, C. F., Martín, J., Diez, M., Cabreira, A., Presta, M. L., Capitanio, F. L., & Boy, C. C. (2023). Spring plankton energy content by size classes in two contrasting environments of a high latitude ecosystem: The Beagle Channel. Journal of Marine Systems, 240, 103876. https://doi.org/10.1016/j.jmarsys.2023.103876
+
+Dashkova, V., Malashenkov, D., Poulton, N., Vorobjev, I., & Barteneva, N. S. (2017). Imaging flow cytometry for phytoplankton analysis. Methods, 112, 188–200. https://doi.org/10.1016/j.ymeth.2016.05.007
+
+Dunstan, P. K., Foster, S. D., King, E., Risbey, J., O’Kane, T. J., Monselesan, D., Hobday, A. J., Hartog, J. R., & Thompson, P. A. (2018). Global patterns of change and variation in sea surface temperature and chlorophyll a. Scientific Reports, 8(1), Article 1. https://doi.org/10.1038/s41598-018-33057-y
+
+Falkowski, P. G. (1994). The role of phytoplankton photosynthesis in global biogeochemical cycles. Photosynthesis Research, 39(3), 235–258. https://doi.org/10.1007/BF00014586
+
+Field, C. B., Behrenfeld, M. J., Randerson, J. T., & Falkowski, P. (1998). Primary Production of the Biosphere: Integrating Terrestrial and Oceanic Components. Science, 281(5374), 237–240. https://doi.org/10.1126/science.281.5374.237
+
+Flombaum, P., & Martiny, A. C. (2021). Diverse but uncertain responses of picophytoplankton lineages to future climate change. Limnology and Oceanography, 66(12), 4171–4181. https://doi.org/10.1002/lno.11951
+
+Heil, C. A., Revilla, M., Glibert, P. M., & Murasko, S. (2007). Nutrient quality drives differential phytoplankton community composition on the southwest Florida shelf. Limnology and Oceanography, 52(3), 1067–1078. https://doi.org/10.4319/lo.2007.52.3.1067
+
+Henson, S. A., Cael, B. B., Allen, S. R., & Dutkiewicz, S. (2021). Future phytoplankton diversity in a changing climate. Nature Communications, 12(1), Article 1. https://doi.org/10.1038/s41467-021-25699-w
+
+Menden-Deuer, S., Morison, F., Montalbano, A. L., Franzè, G., Strock, J., Rubin, E., McNair, H., Mouw, C., & Marrec, P. (2020). Multi-Instrument Assessment of Phytoplankton Abundance and Cell Sizes in Mono-Specific Laboratory Cultures and Whole Plankton Community Composition in the North Atlantic. Frontiers in Marine Science, 7. https://www.frontiersin.org/articles/10.3389/fmars.2020.00254
+
+Orkney, A., Davidson, K., Mitchell, E., Henley, S. F., & Bouman, H. A. (2022). Different Observational Methods and the Detection of Seasonal and Atlantic Influence Upon Phytoplankton Communities in the Western Barents Sea. Frontiers in Marine Science, 9. https://www.frontiersin.org/articles/10.3389/fmars.2022.860773
+
+Parparov, A., & Gal, G. (2022). The effects of changes in diversity on phytoplankton community metabolism. Inland Waters, 12(4), 499–509. https://doi.org/10.1080/20442041.2022.2040406
+
+Pershing, A. J., Alexander, M. A., Hernandez, C. M., Kerr, L. A., Le Bris, A., Mills, K. E., Nye, J. A., Record, N. R., Scannell, H. A., Scott, J. D., Sherwood, G. D., & Thomas, A. C. (2015). Slow adaptation in the face of rapid warming leads to collapse of the Gulf of Maine cod fishery. Science, 350(6262), 809–812. https://doi.org/10.1126/science.aac9819
+
+R Core Team. (2023, October 17). R: The R Project for Statistical Computing. https://www.r-project.org/
+
+Ray, R. (2023, August 23). Researchers Identify Unusually Large Bloom of Brown Algae in Gulf of Maine. UNH Today. https://www.unh.edu/unhtoday/2023/08/researchers-identify-unusually-large-bloom-brown-algae-gulf-maine
+
+Sieburth, J. McN., Smetacek, V., & Lenz, J. (1978). Pelagic ecosystem structure: Heterotrophic compartments of the plankton and their relationship to plankton size fractions 1. Limnology and Oceanography, 23(6), 1256–1263. https://doi.org/10.4319/lo.1978.23.6.1256
+
+Sugie, K., Fujiwara, A., Nishino, S., Kameyama, S., & Harada, N. (2020). Impacts of Temperature, CO2, and Salinity on Phytoplankton Community Composition in the Western Arctic Ocean. Frontiers in Marine Science, 6. https://www.frontiersin.org/articles/10.3389/fmars.2019.00821
+
