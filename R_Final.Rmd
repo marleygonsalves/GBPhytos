@@ -1,5 +1,5 @@
 ---
-title: "BIOL 906 Final Assignment: Great Bay Phytoplankton "
+title: "BIOL 806 Final Assignment: Great Bay Phytoplankton "
 author: "Marley Gonsalves"
 date: "2023-12-08"
 output:
@@ -16,6 +16,10 @@ library(dplyr)
 library(ggplot2)
 library(lubridate)
 ```
+
+# Abstract
+
+An analysis of the differences in chlorophyll, temperature, particle size, and particle number of water samples in Great Bay between the summers of 2021 and 2023. Data was accessed via th NERRS buoy in Great Bay and FlowCam analysis of water samples. Significant differences were observed in chlorophyll concentration and average particle diameter. Chlorophyll and temperature were positively correlated for both years. No correlation was observed between temperature and particle size/number, or chlorophyll and particle size/number. 
 
 # Introduction
 
@@ -235,17 +239,6 @@ summary(aov_1.3)
 summary(aov_1.4)
 summary(aov_1.5)
 summary(aov_1.6)
-
-
-aov_1.7 <- aov(Average_Chlorophyll ~ Year, data = cleanNERRS_data)
-aov_1.8 <- aov(Average_Temperature ~ Year, data = cleanNERRS_data)
-summary(aov_1.7)
-summary(aov_1.8)
-
-tukeyHSD_1.1 <- TukeyHSD(aov_1.5, "Month")
-tukeyHSD_1.2 <- TukeyHSD(aov_1.6, "Month")
-print(tukeyHSD_1.1)
-print(tukeyHSD_1.2)
 
 
 lm_1.1 <- lm(Average_Temperature ~ JulianDay, data = subset(sampleday_data, Year == 2021))
